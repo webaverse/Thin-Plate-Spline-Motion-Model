@@ -1,159 +1,108 @@
-import os
-import sys
-sys.path.insert(0, "stylegan-encoder")
-import tempfile
-import warnings
-import imageio
-import numpy as np
-import matplotlib.pyplot as plt
+import torch
+import cv2
+
 import matplotlib.animation as animation
 from skimage.transform import resize
+import matplotlib.pyplot as plt
+import numpy as np
+import imageio
+import warnings
+warnings.filterwarnings('ignore')
+
+from demo import load_checkpoints, make_animation
 from skimage import img_as_ubyte
-import torch
-import torchvision.transforms as transforms
-import dlib
 
-from demo import load_checkpoints
-from demo import make_animation
-from ffhq_dataset.face_alignment import image_align
-from ffhq_dataset.landmarks_detector import LandmarksDetector
+from flask import Flask, Response, request, send_from_directory
 
-from flask import Flask, Response, request
-
-
-warnings.filterwarnings("ignore")
-
-
-PREDICTOR = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
-LANDMARKS_DETECTOR = LandmarksDetector("shape_predictor_68_face_landmarks.dat")
 
 app = Flask(__name__)
 
 
-# def predict(
-#     self,
-#     source_image: Path = Input(
-#         description="Input source image.",
-#     ),
-#     driving_video: Path = Input(
-#         description="Choose a micromotion.",
-#     ),
-#     dataset_name: str = Input(
-#         choices=["vox", "taichi", "ted", "mgif"],
-#         default="vox",
-#         description="Choose a dataset.",
-#     ),
-# ) -> Path:
-
 @app.route('/predict', methods=['OPTIONS', 'POST'])
 def predict():
-    if (request.method == 'OPTIONS'):
-        print('got options 1')
-        response = Response()
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Headers'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = '*'
-        response.headers['Access-Control-Expose-Headers'] = '*'
-        response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
-        response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
-        response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
-        print('got options 2')
-        return response
+	if (request.method == 'OPTIONS'):
+		print('got options 1')
+		response = Response()
+		response.headers['Access-Control-Allow-Origin'] = '*'
+		response.headers['Access-Control-Allow-Headers'] = '*'
+		response.headers['Access-Control-Allow-Methods'] = '*'
+		response.headers['Access-Control-Expose-Headers'] = '*'
+		response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+		response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
+		response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+		print('got options 2')
+		return response
 
-    predict_mode = "relative"  # ['standard', 'relative', 'avd']
-    # find_best_frame = False
+	predict_mode = 'relative'  # ['standard', 'relative', 'avd']
 
-    source_image = flask.request.get_data()
-    driving_video = request.args.get("dv")
-    dataset_name = request.args.get("dataset")
+	body = request.get_data()
+	source_image = cv2.imdecode(np.frombuffer(body, np.uint8), cv2.IMREAD_COLOR)
+	#driving_video_arg = request.args.get('dv')
+	dataset_name = request.args.get('dataset')
 
-    pixel = 384 if dataset_name == "ted" else 256
+	pixel = 256 # for vox, taichi and mgif, the resolution is 256*256
+	if(dataset_name == 'ted'): # for ted, the resolution is 384*384
+		pixel = 384
 
-    if dataset_name == "vox":
-        # first run face alignment
-        align_image(str(source_image), 'aligned.png')
-        source_image = imageio.imread('aligned.png')
-    else:
-        source_image = imageio.imread(str(source_image))
-    reader = imageio.get_reader(str(driving_video))
-    fps = reader.get_meta_data()["fps"]
-    source_image = resize(source_image, (pixel, pixel))[..., :3]
+	driving_video_arg = './assets/driving.mp4'
+	# source_image = imageio.imread(source_image_path)
+	reader = imageio.get_reader(driving_video_arg)
 
-    driving_video = []
-    try:
-        for im in reader:
-            driving_video.append(im)
-    except RuntimeError:
-        pass
-    reader.close()
+	source_image = resize(source_image, (pixel, pixel))[..., :3]
 
-    driving_video = [
-        resize(frame, (pixel, pixel))[..., :3] for frame in driving_video
-    ]
+	fps = reader.get_meta_data()['fps']
+	driving_video = []
+	try:
+		for im in reader:
+			driving_video.append(im)
+	except RuntimeError:
+		pass
+	reader.close()
 
-    inpainting, kp_detector, dense_motion_network, avd_network = (
-        self.inpainting[dataset_name],
-        self.kp_detector[dataset_name],
-        self.dense_motion_network[dataset_name],
-        self.avd_network[dataset_name],
-    )
+	driving_video = [resize(frame, (pixel, pixel))[..., :3] for frame in driving_video]
 
-    predictions = make_animation(
-        source_image,
-        driving_video,
-        inpainting,
-        kp_detector,
-        dense_motion_network,
-        avd_network,
-        device="cuda:0",
-        mode=predict_mode,
-    )
+	if predict_mode == 'relative' and find_best_frame:
+		from demo import find_best_frame as _find
+		i = _find(source_image, driving_video, device.type == 'cpu')
+		print ('Best frame: ' + str(i))
+		driving_forward = driving_video[i:]
+		driving_backward = driving_video[:(i+1)][::-1]
+		predictions_forward = make_animation(source_image, driving_forward, inpainting, kp_detector, dense_motion_network, avd_network, device = device, mode = predict_mode)
+		predictions_backward = make_animation(source_image, driving_backward, inpainting, kp_detector, dense_motion_network, avd_network, device = device, mode = predict_mode)
+		predictions = predictions_backward[::-1] + predictions_forward[1:]
+	else:
+		predictions = make_animation(source_image, driving_video, inpainting, kp_detector, dense_motion_network, avd_network, device = device, mode = predict_mode)
 
-    # save resulting video
-    # out_path = Path(tempfile.mkdtemp()) / "output.mp4"
-    # imageio.mimsave(
-    #     str(out_path), [img_as_ubyte(frame) for frame in predictions], fps=fps
-    # )
-    # return out_path
+	# save resulting video
+	imageio.mimsave(str(out_path), [img_as_ubyte(frame) for frame in predictions], fps=fps)
+	# return out_path
 
-    response = Response() # TODO return video
-    response.headers['Content-Type'] = 'image/jpeg'
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Headers'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = '*'
-    response.headers['Access-Control-Expose-Headers'] = '*'
-    response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
-    response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
-    response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
-    return response
+	# response = Response() # TODO return video
+	# response.headers['Content-Type'] = 'video/mp4'
+	# response.headers['Access-Control-Allow-Origin'] = '*'
+	# response.headers['Access-Control-Allow-Headers'] = '*'
+	# response.headers['Access-Control-Allow-Methods'] = '*'
+	# response.headers['Access-Control-Expose-Headers'] = '*'
+	# response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+	# response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
+	# response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+	# return response
 
-
-def align_image(raw_img_path, aligned_face_path):
-    for i, face_landmarks in enumerate(LANDMARKS_DETECTOR.get_landmarks(raw_img_path), start=1):
-        image_align(raw_img_path, aligned_face_path, face_landmarks)
+	return send_from_directory('./', 'output.mp4', as_attachment=True)
 
 
 if __name__ == '__main__':
-    device = torch.device("cuda:0")
-    datasets = ["vox", "taichi", "ted", "mgif"]
-    (
-        inpainting,
-        kp_detector,
-        dense_motion_network,
-        avd_network,
-    ) = ({}, {}, {}, {})
-    for d in datasets:
-        (
-            inpainting[d],
-            kp_detector[d],
-            dense_motion_network[d],
-            avd_network[d],
-        ) = load_checkpoints(
-            config_path=f"config/{d}-384.yaml"
-            if d == "ted"
-            else f"config/{d}-256.yaml",
-            checkpoint_path=f"checkpoints/{d}.pth.tar",
-            device=device,
-        )
+	# edit the config
+	device = torch.device('cuda:0')
+	#dataset_name = 'vox' # ['vox', 'taichi', 'ted', 'mgif']
+	source_image_path = './assets/source.png'
+	driving_video_path = './assets/driving.mp4'
+	out_path = './output.mp4'
+	config_path = 'config/vox-256.yaml'
+	checkpoint_path = 'checkpoints/vox.pth.tar'
+	predict_mode = 'relative' # ['standard', 'relative', 'avd']
+	find_best_frame = False # when use the relative mode to animate a face, use 'find_best_frame=True' can get better quality result
 
-    app.run(host='0.0.0.0', port=8080, debug=False, threaded=True)
+	inpainting, kp_detector, dense_motion_network, avd_network = load_checkpoints(config_path = config_path, checkpoint_path = checkpoint_path, device = device)
+
+	app.run(host='0.0.0.0', port=8080, debug=False, threaded=True)
