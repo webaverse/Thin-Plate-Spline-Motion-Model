@@ -10,6 +10,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 from demo import load_checkpoints, make_animation
+from demo import find_best_frame as _find
 from skimage import img_as_ubyte
 
 from flask import Flask, Response, request, send_from_directory
@@ -36,7 +37,8 @@ def predict():
 	predict_mode = 'relative'  # ['standard', 'relative', 'avd']
 
 	body = request.get_data()
-	source_image = cv2.imdecode(np.frombuffer(body, np.uint8), cv2.IMREAD_COLOR)
+	# source_image = cv2.imdecode(np.frombuffer(body, np.uint8), cv2.IMREAD_COLOR)
+	source_image = imageio.imread(body, index=None)
 	#driving_video_arg = request.args.get('dv')
 	dataset_name = request.args.get('dataset')
 
@@ -62,16 +64,15 @@ def predict():
 	driving_video = [resize(frame, (pixel, pixel))[..., :3] for frame in driving_video]
 
 	if predict_mode == 'relative' and find_best_frame:
-		from demo import find_best_frame as _find
 		i = _find(source_image, driving_video, device.type == 'cpu')
 		print ('Best frame: ' + str(i))
 		driving_forward = driving_video[i:]
 		driving_backward = driving_video[:(i+1)][::-1]
-		predictions_forward = make_animation(source_image, driving_forward, inpainting, kp_detector, dense_motion_network, avd_network, device = device, mode = predict_mode)
-		predictions_backward = make_animation(source_image, driving_backward, inpainting, kp_detector, dense_motion_network, avd_network, device = device, mode = predict_mode)
+		predictions_forward = make_animation(source_image, driving_forward, inpainting, kp_detector, dense_motion_network, avd_network, device=device, mode=predict_mode)
+		predictions_backward = make_animation(source_image, driving_backward, inpainting, kp_detector, dense_motion_network, avd_network, device=device, mode=predict_mode)
 		predictions = predictions_backward[::-1] + predictions_forward[1:]
 	else:
-		predictions = make_animation(source_image, driving_video, inpainting, kp_detector, dense_motion_network, avd_network, device = device, mode = predict_mode)
+		predictions = make_animation(source_image, driving_video, inpainting, kp_detector, dense_motion_network, avd_network, device=device, mode=predict_mode)
 
 	# save resulting video
 	imageio.mimsave(str(out_path), [img_as_ubyte(frame) for frame in predictions], fps=fps)
