@@ -36,9 +36,12 @@ def predict():
 
 	predict_mode = 'relative'  # ['standard', 'relative', 'avd']
 
-	body = request.get_data()
+	# body = request.get_data()
+	image = request.files['image']
+	video =  request.files['video']
+
 	# source_image = cv2.imdecode(np.frombuffer(body, np.uint8), cv2.IMREAD_COLOR)
-	source_image = imageio.imread(body, index=None)
+	source_image = imageio.imread(image)
 	#driving_video_arg = request.args.get('dv')
 	dataset_name = request.args.get('dataset')
 
@@ -46,9 +49,12 @@ def predict():
 	if(dataset_name == 'ted'): # for ted, the resolution is 384*384
 		pixel = 384
 
-	driving_video_arg = './assets/driving.mp4'
+	from werkzeug.utils import secure_filename
+	video.save(secure_filename(video.filename))
+	#driving_video_arg = './assets/driving.mp4'
 	# source_image = imageio.imread(source_image_path)
-	reader = imageio.get_reader(driving_video_arg)
+	# reader = imageio.get_reader(driving_video_arg)
+	reader = imageio.get_reader(video.filename)
 
 	source_image = resize(source_image, (pixel, pixel))[..., :3]
 
