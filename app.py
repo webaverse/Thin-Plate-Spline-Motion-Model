@@ -1,13 +1,14 @@
 import torch
 import cv2
+import os
 
 import matplotlib.animation as animation
 from skimage.transform import resize
 import matplotlib.pyplot as plt
 import numpy as np
-import imageio
 import warnings
 warnings.filterwarnings('ignore')
+import imageio
 
 from demo import load_checkpoints, make_animation
 from demo import find_best_frame as _find
@@ -83,6 +84,7 @@ def predict():
 	# save resulting video
 	imageio.mimsave(str(out_path), [img_as_ubyte(frame) for frame in predictions], fps=fps)
 	# return out_path
+	os.remove(video.filename)
 
 	# response = Response() # TODO return video
 	# response.headers['Content-Type'] = 'video/mp4'
